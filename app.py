@@ -12,26 +12,39 @@ st.set_page_config(page_title="CBSE Engine", page_icon="📝")
 st.title("CBSE 2026 ID Finder")
 st.caption("Made by Legionnaire")
 
-# --- Sidebar Configuration ---
-with st.sidebar:
-    st.header("Target Data")
+st.divider()
+
+# --- Disclaimer ---
+st.info("Notice: School Code and Admit Card Suffix need not be changed if you are scanning for students in your same school/center block.")
+
+# --- Main Page Inputs (Mobile First Layout) ---
+st.subheader("Target Parameters")
+col1, col2, col3 = st.columns(3)
+
+with col1:
     roll_no = st.text_input("Roll Number", value="18602421")
+with col2:
     school_code = st.text_input("School Code", value="45498")
+with col3:
     fixed_suffix = st.text_input("Admit Card Suffix", value="4510")
-    
-    st.divider()
-    st.header("Settings")
-    # Defaulting index to 1 selects "Standard (2 Letters)" automatically
+
+st.subheader("Execution Settings")
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    # 3-Letter mode removed completely
     scan_mode = st.radio(
         "Search Depth:", 
-        ["Ultra-Short (1 Letter)", "Standard (2 Letters)", "Deep (3 Letters)"],
+        ["Ultra-Short (1 Letter)", "Standard (2 Letters)"],
         index=1
     )
-    include_spaces = st.checkbox("Include Space padding", value=True)
-    
-    # Constrained to 1 - 5 slider range
+with col5:
+    # Concurrency capped strictly between 1 and 5
     threads = st.slider("Threads (Concurrency):", 1, 5, 3)
+with col6:
     start_combo = st.text_input("Start From:", value="AA").upper()
+
+include_spaces = st.checkbox("Include Space padding", value=True)
 
 base_url = "https://cbseresults.nic.in/class_xii_b_2026_a/ClassTwelfth_ii26.htm"
 post_url = "https://cbseresults.nic.in/class_xii_b_2026_a/ClassTwelfth_ii_2026.asp"
@@ -76,13 +89,7 @@ def run_scan():
     if include_spaces:
         chars.append(" ")
         
-    if "1 Letter" in scan_mode:
-        depth = 1
-    elif "2 Letters" in scan_mode:
-        depth = 2
-    else:
-        depth = 3
-        
+    depth = 1 if "1 Letter" in scan_mode else 2
     all_combos = ["".join(c) for c in itertools.product(chars, repeat=depth)]
     
     try:
@@ -110,4 +117,23 @@ def run_scan():
             progress_bar.progress(min(done / len(search_space), 1.0))
             
             display_id = data[0] if res_type == "SUCCESS" else data
-            status_text.write
+            status_text.write(f"Testing: '{display_id}' | Progress: {done}/{len(search_space)}")
+
+            if res_type == "SUCCESS":
+                admit_id, html = data
+                st.success(f"Match found: {admit_id}")
+                st.components.v1.html(html, height=800, scrolling=True)
+                found = True
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
+            
+            if res_type == "BLOCKED":
+                st.error(f"IP limited at ID '{data}'. Change connection and resume.")
+                executor.shutdown(wait=False, cancel_futures=True)
+                return
+
+    if not found:
+        st.warning("Scan complete. No matching ID found.")
+
+if st.button("Start Scan"):
+    run_scan()
