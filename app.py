@@ -29,22 +29,14 @@ with col3:
     fixed_suffix = st.text_input("Admit Card Suffix", value="4510")
 
 st.subheader("Execution Settings")
-col4, col5, col6 = st.columns(3)
+col4, col5 = st.columns(2)
 
 with col4:
-    # 3-Letter mode removed completely
-    scan_mode = st.radio(
-        "Search Depth:", 
-        ["Ultra-Short (1 Letter)", "Standard (2 Letters)"],
-        index=1
-    )
-with col5:
-    # Concurrency capped strictly between 1 and 5
+    # Concurrency restricted to 1 - 5 range
     threads = st.slider("Threads (Concurrency):", 1, 5, 3)
-with col6:
-    start_combo = st.text_input("Start From:", value="AA").upper()
-
-include_spaces = st.checkbox("Include Space padding", value=True)
+with col5:
+    # Initialized to 'A' as it starts with 1-letter entries
+    start_combo = st.text_input("Start From:", value="A").upper()
 
 base_url = "https://cbseresults.nic.in/class_xii_b_2026_a/ClassTwelfth_ii26.htm"
 post_url = "https://cbseresults.nic.in/class_xii_b_2026_a/ClassTwelfth_ii_2026.asp"
@@ -86,11 +78,14 @@ def check_id_sync(combo):
 def run_scan():
     vowels = ['A', 'E', 'I', 'O', 'U']
     chars = vowels + [c for c in string.ascii_uppercase if c not in vowels]
-    if include_spaces:
-        chars.append(" ")
         
-    depth = 1 if "1 Letter" in scan_mode else 2
-    all_combos = ["".join(c) for c in itertools.product(chars, repeat=depth)]
+    # Generate 1-letter options first
+    combos_1 = ["".join(c) for c in itertools.product(chars, repeat=1)]
+    # Generate 2-letter options second
+    combos_2 = ["".join(c) for c in itertools.product(chars, repeat=2)]
+    
+    # Combine sequences sequentially (Pure A-Z alphabet only)
+    all_combos = combos_1 + combos_2
     
     try:
         start_idx = all_combos.index(start_combo)
@@ -102,7 +97,7 @@ def run_scan():
     status_text = st.empty()
     found = False
 
-    st.info(f"Scan active: Cycling through {len(search_space)} combinations.")
+    st.info(f"Scan active: Cycling through {len(search_space)} integrated combinations.")
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         future_to_combo = {executor.submit(check_id_sync, combo): combo for combo in search_space}
